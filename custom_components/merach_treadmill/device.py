@@ -17,6 +17,9 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
+    KEEPALIVE_DATA,
+    KEEPALIVE_INTERVAL,
+    KEEPALIVE_UUID,
     MAX_SPEED,
     MIN_SPEED,
     NOTIFY_UUID,
@@ -38,6 +41,8 @@ def frame(*payload: int) -> bytes:
 
 
 CMD_STATUS = frame(0x51)
+CMD_INFO_MODEL = frame(0x50, 0x00)
+CMD_INFO_SPEED = frame(0x50, 0x03)
 CMD_START = frame(0x53, 0x01, 0, 0, 0, 0, 0, 0, 0, 0)
 CMD_STOP = frame(0x53, 0x03)
 
@@ -94,9 +99,15 @@ class MerachTreadmill:
                 try:
                     await self._connect()
                     last_error = None
+                    loop = asyncio.get_running_loop()
+                    next_keepalive = loop.time() + KEEPALIVE_INTERVAL
                     while self._client is not None and self._client.is_connected:
+                        if loop.time() >= next_keepalive:
+                            await self._keepalive()
+                            next_keepalive = loop.time() + KEEPALIVE_INTERVAL
                         await self._write(CMD_STATUS)
                         await asyncio.sleep(POLL_INTERVAL)
+                    _LOGGER.warning("%s: Verbindung verloren", self.name)
                 except (BleakError, TimeoutError) as err:
                     error = f"{type(err).__name__}: {err}"
                     # Gleiche Fehler nur einmal als Warnung, Wiederholungen im Debug-Log
@@ -126,8 +137,12 @@ class MerachTreadmill:
             max_attempts=3,
         )
         self._client = client
+        # Ablauf wie die Merach-App: erst Keep-alive, dann Notifications, dann Geräteinfos
+        await self._keepalive()
         _LOGGER.debug("%s: Verbindung steht, aktiviere Notifications", self.name)
         await client.start_notify(NOTIFY_UUID, self._on_notify)
+        await self._write(CMD_INFO_MODEL)
+        await self._write(CMD_INFO_SPEED)
         _LOGGER.info("%s: verbunden", self.name)
         self.state.connected = True
         self._notify_listeners()
@@ -170,12 +185,16 @@ class MerachTreadmill:
             state.speed = 0.0
         self.hass.loop.call_soon_threadsafe(self._notify_listeners)
 
-    async def _write(self, data: bytes) -> None:
+    async def _write(self, data: bytes, uuid: str = WRITE_UUID) -> None:
         async with self._write_lock:
             client = self._client
             if client is None or not client.is_connected:
                 raise BleakError("nicht verbunden")
-            await client.write_gatt_char(WRITE_UUID, data, response=True)
+            await client.write_gatt_char(uuid, data, response=True)
+
+    async def _keepalive(self) -> None:
+        _LOGGER.debug("%s: Keep-alive", self.name)
+        await self._write(KEEPALIVE_DATA, KEEPALIVE_UUID)
 
     async def _command(self, data: bytes) -> None:
         try:
