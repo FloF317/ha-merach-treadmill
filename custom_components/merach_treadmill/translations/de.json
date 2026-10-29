@@ -1,0 +1,18 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "title": "Laufband auswählen",
+        "description": "Wird kein Laufband gefunden, die Bluetooth-Adresse eingeben (Format AA:BB:CC:DD:EE:FF).",
+        "data": { "address": "Laufband" }
+      },
+      "bluetooth_confirm": {
+        "description": "{name} einrichten?"
+      }
+    },
+    "abort": {
+      "already_configured": "Dieses Laufband ist bereits eingerichtet."
+    }
+  }
+}
