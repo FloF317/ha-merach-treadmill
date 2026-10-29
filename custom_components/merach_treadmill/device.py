@@ -207,8 +207,10 @@ class MerachTreadmill:
         if client is not None and client.is_connected:
             try:
                 await client.disconnect()
-            except BleakError:
-                pass
+            except (BleakError, TimeoutError) as err:
+                # Z. B. Laufband ohne Strom: Trennen läuft ins Leere, darf aber
+                # die Wiederverbindungs-Schleife nicht beenden
+                _LOGGER.debug("%s: Trennen fehlgeschlagen: %s", self.name, err)
         self._set_disconnected()
 
     def _on_disconnect(self, _client: BleakClient) -> None:
