@@ -123,15 +123,16 @@ class MerachTreadmill:
             BluetoothScanningMode.ACTIVE,
         )
         first_attempt = True
+        ended_at = time.monotonic()
         try:
             while True:
                 if not first_attempt:
                     await asyncio.sleep(RECONNECT_INTERVAL)
                     # Erst wieder verbinden, wenn das Laufband sich frisch meldet.
                     # Blinde Versuche pausieren beim Pi-Adapter das Scannen.
-                    self._advertised.clear()
                     _LOGGER.debug("%s: warte auf Advertisement", self.name)
-                    await self._advertised.wait()
+                    await self._wait_for_advertisement(ended_at)
+                    _LOGGER.debug("%s: Laufband meldet sich wieder", self.name)
                 first_attempt = False
                 try:
                     await self._connect()
@@ -154,9 +155,30 @@ class MerachTreadmill:
                 except Exception:
                     _LOGGER.exception("%s: Unerwarteter Fehler", self.name)
                 await self.async_disconnect()
+                ended_at = time.monotonic()
         finally:
             unregister()
             await self.async_disconnect()
+
+    async def _wait_for_advertisement(self, since: float) -> None:
+        """Warten, bis das Laufband nach `since` wieder gesehen wurde.
+
+        Home Assistant meldet unveränderte Advertisements nicht erneut per
+        Callback, nach dem Aus- und Einschalten sendet das Laufband aber exakt
+        dasselbe. Daher zusätzlich den Zeitstempel der letzten Sichtung prüfen.
+        """
+        self._advertised.clear()
+        while True:
+            info = bluetooth.async_last_service_info(
+                self.hass, self.address, connectable=True
+            )
+            if info is not None and info.time > since:
+                return
+            try:
+                await asyncio.wait_for(self._advertised.wait(), timeout=5)
+                return
+            except TimeoutError:
+                pass
 
     async def _connect(self) -> None:
         ble_device = bluetooth.async_ble_device_from_address(
