@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF4F8B"/>
+      <stop offset="0.55" stop-color="#8B5CF6"/>
+      <stop offset="1" stop-color="#2F80ED"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="256" height="256" rx="56" fill="url(#bg)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Geschwindigkeitslinien -->
+    <path d="M30 104 H62 M22 130 H58 M34 156 H64" stroke-width="9" opacity="0.75"/>
+    <!-- Läufer -->
+    <circle cx="140" cy="58" r="15" fill="#FFFFFF" stroke="none"/>
+    <path d="M132 82 L116 132" stroke-width="15"/>
+    <path d="M130 90 L104 106 L88 96 M130 90 L152 106 L170 96" stroke-width="11"/>
+    <path d="M116 132 L138 150 L128 178 M116 132 L98 156 L74 158" stroke-width="12"/>
+    <!-- Laufband -->
+    <path d="M206 186 L186 96 L160 102" stroke-width="12"/>
+    <rect x="42" y="182" width="180" height="26" rx="13" fill="#FFFFFF" stroke="none"/>
+  </g>
+  <circle cx="58" cy="195" r="6" fill="#8B5CF6"/>
+  <circle cx="206" cy="195" r="6" fill="#2F80ED"/>
+</svg>

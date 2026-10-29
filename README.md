@@ -1,3 +1,5 @@
+<img src="custom_components/merach_treadmill/brand/icon.png" alt="Logo" width="128" align="right">
+
 # Merach Laufband (FitShow) für Home Assistant
 
 Custom Integration für Merach-Laufbänder (getestet mit `MRK-T21-…`), die sich per Bluetooth über das **FitShow-Protokoll** steuern lassen (Service `FFF0`, Write `FFF2`, Notify `FFF1`).
