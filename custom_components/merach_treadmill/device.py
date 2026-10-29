@@ -1,4 +1,4 @@
-"""Verbindung und FitShow-Protokoll für das Merach-Laufband."""
+"""Verbindung, FitShow-Steuerung und FTMS-Messwerte für das Merach-Laufband."""
 
 from __future__ import annotations
 
@@ -32,8 +32,10 @@ from .const import (
     POLL_INTERVAL,
     RECONNECT_INTERVAL,
     STATUS_RUNNING,
+    TREADMILL_DATA_UUID,
     WRITE_UUID,
 )
+from .ftms import parse_treadmill_data
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -84,6 +86,7 @@ class MerachTreadmill:
         self._write_lock = asyncio.Lock()
         self._advertised = asyncio.Event()
         self._keepalive_ok = False
+        self._ftms_active = False
 
     def add_listener(self, update_callback: Callable[[], None]) -> Callable[[], None]:
         """Callback für Zustandsänderungen registrieren."""
@@ -176,6 +179,15 @@ class MerachTreadmill:
         _LOGGER.debug("%s: Verbindung steht, aktiviere Notifications", self.name)
         await client.start_notify(NOTIFY_UUID, self._on_notify)
 
+        self._ftms_active = False
+        try:
+            await client.start_notify(TREADMILL_DATA_UUID, self._on_treadmill_data)
+            self._ftms_active = True
+        except BleakError as err:
+            _LOGGER.warning(
+                "%s: FTMS-Daten nicht verfügbar, nutze nur FitShow: %s", self.name, err
+            )
+
         for command in (CMD_INFO_MODEL, CMD_INFO_SPEED):
             try:
                 await self._write(command)
@@ -214,13 +226,29 @@ class MerachTreadmill:
         state = self.state
         state.status = data[2]
         if state.status == STATUS_RUNNING and len(data) >= 15:
-            state.speed = data[3] / 10
-            state.elapsed = data[5] | data[6] << 8
-            state.distance = data[7] | data[8] << 8
-            state.calories = data[9] | data[10] << 8
             state.steps = data[11] | data[12] << 8
+            # FitShow meldet hier nur die Startgeschwindigkeit, FTMS ist genauer
+            if not self._ftms_active:
+                state.speed = data[3] / 10
+                state.elapsed = data[5] | data[6] << 8
+                state.distance = data[7] | data[8] << 8
+                state.calories = data[9] | data[10] << 8
         elif state.status != STATUS_RUNNING:
             state.speed = 0.0
+        self.hass.loop.call_soon_threadsafe(self._notify_listeners)
+
+    def _on_treadmill_data(self, _char: BleakGATTCharacteristic, data: bytearray) -> None:
+        _LOGGER.debug("%s: FTMS %s", self.name, data.hex())
+        parsed = parse_treadmill_data(bytes(data))
+        state = self.state
+        if parsed.speed is not None and state.status == STATUS_RUNNING:
+            state.speed = parsed.speed
+        if parsed.distance is not None:
+            state.distance = parsed.distance
+        if parsed.calories is not None:
+            state.calories = parsed.calories
+        if parsed.elapsed is not None:
+            state.elapsed = parsed.elapsed
         self.hass.loop.call_soon_threadsafe(self._notify_listeners)
 
     async def _write(self, data: bytes, uuid: str = WRITE_UUID) -> None:

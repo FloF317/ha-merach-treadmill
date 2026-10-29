@@ -5,6 +5,8 @@ DOMAIN = "merach_treadmill"
 SERVICE_UUID = "0000fff0-0000-1000-8000-00805f9b34fb"
 NOTIFY_UUID = "0000fff1-0000-1000-8000-00805f9b34fb"
 WRITE_UUID = "0000fff2-0000-1000-8000-00805f9b34fb"
+# FTMS Treadmill Data, liefert die tatsächliche Geschwindigkeit
+TREADMILL_DATA_UUID = "00002acd-0000-1000-8000-00805f9b34fb"
 # Merach-eigene Characteristic, die App schreibt hier beim Verbinden und alle 30 s AA01000155
 KEEPALIVE_UUID = "59554c55-0000-6666-8888-4d4552414348"
 KEEPALIVE_DATA = bytes.fromhex("aa01000155")
