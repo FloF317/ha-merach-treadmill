@@ -88,15 +88,21 @@ class MerachTreadmill:
 
     async def async_run(self) -> None:
         """Verbinden, abfragen und bei Abbruch neu verbinden."""
+        last_error: str | None = None
         try:
             while True:
                 try:
                     await self._connect()
+                    last_error = None
                     while self._client is not None and self._client.is_connected:
                         await self._write(CMD_STATUS)
                         await asyncio.sleep(POLL_INTERVAL)
                 except (BleakError, TimeoutError) as err:
-                    _LOGGER.debug("%s: Verbindung fehlgeschlagen: %s", self.name, err)
+                    error = f"{type(err).__name__}: {err}"
+                    # Gleiche Fehler nur einmal als Warnung, Wiederholungen im Debug-Log
+                    log = _LOGGER.debug if error == last_error else _LOGGER.warning
+                    log("%s: Verbindung fehlgeschlagen: %s", self.name, error)
+                    last_error = error
                 except Exception:
                     _LOGGER.exception("%s: Unerwarteter Fehler", self.name)
                 await self.async_disconnect()
@@ -111,6 +117,7 @@ class MerachTreadmill:
         if ble_device is None:
             raise BleakError("Laufband nicht in Reichweite oder ausgeschaltet")
 
+        _LOGGER.debug("%s: verbinde mit %s", self.name, ble_device)
         client = await establish_connection(
             BleakClientWithServiceCache,
             ble_device,
@@ -119,6 +126,7 @@ class MerachTreadmill:
             max_attempts=3,
         )
         self._client = client
+        _LOGGER.debug("%s: Verbindung steht, aktiviere Notifications", self.name)
         await client.start_notify(NOTIFY_UUID, self._on_notify)
         _LOGGER.info("%s: verbunden", self.name)
         self.state.connected = True
