@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 import logging
+import time
 
 from bleak import BleakClient
 from bleak.backends.characteristic import BleakGATTCharacteristic
@@ -31,6 +32,7 @@ from .const import (
     NOTIFY_UUID,
     POLL_INTERVAL,
     RECONNECT_INTERVAL,
+    STATUS_COUNTDOWN,
     STATUS_RUNNING,
     TREADMILL_DATA_UUID,
     WRITE_UUID,
@@ -69,8 +71,6 @@ class TreadmillState:
     speed: float = 0.0
     elapsed: int | None = None
     distance: int | None = None
-    calories: int | None = None
-    steps: int | None = None
 
 
 class MerachTreadmill:
@@ -87,6 +87,10 @@ class MerachTreadmill:
         self._advertised = asyncio.Event()
         self._keepalive_ok = False
         self._ftms_active = False
+        # Das Laufband meldet Zeit und Distanz nicht, daher selbst mitzählen
+        self._session_elapsed = 0.0
+        self._session_distance = 0.0
+        self._last_tick: float | None = None
 
     def add_listener(self, update_callback: Callable[[], None]) -> Callable[[], None]:
         """Callback für Zustandsänderungen registrieren."""
@@ -213,10 +217,23 @@ class MerachTreadmill:
 
     @callback
     def _set_disconnected(self) -> None:
+        self._last_tick = None
         if not self.state.connected:
             return
         self.state = TreadmillState()
         self._notify_listeners()
+
+    def _tick(self) -> None:
+        """Trainingszeit und Distanz seit der letzten Meldung fortschreiben."""
+        now = time.monotonic()
+        state = self.state
+        if self._last_tick is not None and state.status == STATUS_RUNNING:
+            dt = min(now - self._last_tick, 30.0)
+            self._session_elapsed += dt
+            self._session_distance += state.speed / 3.6 * dt
+        self._last_tick = now
+        state.elapsed = round(self._session_elapsed)
+        state.distance = round(self._session_distance)
 
     def _on_notify(self, _char: BleakGATTCharacteristic, data: bytearray) -> None:
         _LOGGER.debug("%s: RX %s", self.name, data.hex())
@@ -224,16 +241,19 @@ class MerachTreadmill:
             return
 
         state = self.state
+        self._tick()
+        previous = state.status
         state.status = data[2]
-        if state.status == STATUS_RUNNING and len(data) >= 15:
-            state.steps = data[11] | data[12] << 8
-            # FitShow meldet hier nur die Startgeschwindigkeit, FTMS ist genauer
+        if state.status == STATUS_COUNTDOWN and previous != STATUS_COUNTDOWN:
+            # Neues Training
+            self._session_elapsed = 0.0
+            self._session_distance = 0.0
+            self._tick()
+        if state.status == STATUS_RUNNING:
+            # FTMS meldet die Geschwindigkeit zuverlässiger, FitShow nur als Ersatz
             if not self._ftms_active:
                 state.speed = data[3] / 10
-                state.elapsed = data[5] | data[6] << 8
-                state.distance = data[7] | data[8] << 8
-                state.calories = data[9] | data[10] << 8
-        elif state.status != STATUS_RUNNING:
+        else:
             state.speed = 0.0
         self.hass.loop.call_soon_threadsafe(self._notify_listeners)
 
@@ -241,14 +261,9 @@ class MerachTreadmill:
         _LOGGER.debug("%s: FTMS %s", self.name, data.hex())
         parsed = parse_treadmill_data(bytes(data))
         state = self.state
+        self._tick()
         if parsed.speed is not None and state.status == STATUS_RUNNING:
             state.speed = parsed.speed
-        if parsed.distance is not None:
-            state.distance = parsed.distance
-        if parsed.calories is not None:
-            state.calories = parsed.calories
-        if parsed.elapsed is not None:
-            state.elapsed = parsed.elapsed
         self.hass.loop.call_soon_threadsafe(self._notify_listeners)
 
     async def _write(self, data: bytes, uuid: str = WRITE_UUID) -> None:

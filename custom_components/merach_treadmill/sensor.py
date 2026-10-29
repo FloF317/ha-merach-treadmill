@@ -64,21 +64,6 @@ SENSORS = (
         native_unit_of_measurement=UnitOfLength.METERS,
         value_fn=lambda s: s.distance,
     ),
-    MerachSensorDescription(
-        key="calories",
-        label="Kalorien",
-        icon="mdi:fire",
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        native_unit_of_measurement="kcal",
-        value_fn=lambda s: s.calories,
-    ),
-    MerachSensorDescription(
-        key="steps",
-        label="Schritte",
-        icon="mdi:shoe-print",
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        value_fn=lambda s: s.steps,
-    ),
 )
 
 

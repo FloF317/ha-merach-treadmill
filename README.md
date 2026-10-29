@@ -9,7 +9,9 @@ Das Laufband meldet zwar FTMS (`0x1826`), lehnt FTMS-Steuerbefehle aber mit „C
 ## Funktionen
 - **Buttons:** Start (mit Countdown), Stopp
 - **Schieberegler:** Zielgeschwindigkeit (1,0–6,0 km/h)
-- **Sensoren:** Status, Geschwindigkeit, Trainingszeit, Distanz, Kalorien, Schritte, Verbunden
+- **Sensoren:** Status, Geschwindigkeit, Trainingszeit, Distanz, Verbunden
+
+Die Geschwindigkeit kommt aus den FTMS-Daten (`0x2ACD`). Trainingszeit und Distanz zählt die Integration selbst mit, weil das Laufband dafür nur Nullen meldet.
 
 ## Installation über HACS
 1. HACS → ⋮ → **Benutzerdefinierte Repositories** → `https://github.com/FloF317/ha-merach-treadmill`, Typ **Integration**
@@ -29,7 +31,7 @@ Frame: `02 <cmd> <daten…> <xor(cmd+daten)> 03`
 | Geschwindigkeit (0,1 km/h) | `02 53 02 <speed> 00 <xor> 03` |
 
 Statusantwort im Betrieb: `02 51 03 <speed> <incline> <zeit LE16> <distanz LE16> <kcal LE16> <schritte LE16> … <xor> 03`.
-Zeit, Distanz, Kalorien und Schritte sind aus der FitShow-Dokumentation abgeleitet und noch nicht verifiziert.
+Beim MRK-T21 sind Zeit, Distanz, Kalorien und Schritte in der Statusantwort immer 0.
 
 ## Debug-Logs
 ```yaml

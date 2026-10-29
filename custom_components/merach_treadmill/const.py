@@ -28,4 +28,5 @@ STATUS_NAMES = {
     0x06: "Sicherheitsschlüssel",
     0x0A: "Pausiert",
 }
+STATUS_COUNTDOWN = 0x02
 STATUS_RUNNING = 0x03
