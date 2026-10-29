@@ -83,6 +83,7 @@ class MerachTreadmill:
         self._listeners: list[Callable[[], None]] = []
         self._write_lock = asyncio.Lock()
         self._advertised = asyncio.Event()
+        self._keepalive_ok = False
 
     def add_listener(self, update_callback: Callable[[], None]) -> Callable[[], None]:
         """Callback für Zustandsänderungen registrieren."""
@@ -166,11 +167,20 @@ class MerachTreadmill:
         )
         self._client = client
         # Ablauf wie die Merach-App: erst Keep-alive, dann Notifications, dann Geräteinfos
-        await self._keepalive()
+        await self._setup_keepalive(client)
+
+        if client.services.get_characteristic(NOTIFY_UUID) is None:
+            # Unvollständiger GATT-Cache, beim nächsten Versuch neu einlesen
+            await client.clear_cache()
+            raise BleakError("FitShow-Characteristic FFF1 nicht gefunden, Cache geleert")
         _LOGGER.debug("%s: Verbindung steht, aktiviere Notifications", self.name)
         await client.start_notify(NOTIFY_UUID, self._on_notify)
-        await self._write(CMD_INFO_MODEL)
-        await self._write(CMD_INFO_SPEED)
+
+        for command in (CMD_INFO_MODEL, CMD_INFO_SPEED):
+            try:
+                await self._write(command)
+            except BleakError as err:
+                _LOGGER.debug("%s: Geräteinfo-Abfrage fehlgeschlagen: %s", self.name, err)
         _LOGGER.info("%s: verbunden", self.name)
         self.state.connected = True
         self._notify_listeners()
@@ -220,9 +230,41 @@ class MerachTreadmill:
                 raise BleakError("nicht verbunden")
             await client.write_gatt_char(uuid, data, response=True)
 
+    async def _setup_keepalive(self, client: BleakClient) -> None:
+        """Keep-alive vorbereiten. Fehler hier sollen die Verbindung nicht kosten."""
+        self._keepalive_ok = False
+        if client.services.get_characteristic(KEEPALIVE_UUID) is None:
+            _LOGGER.warning(
+                "%s: Keep-alive-Characteristic nicht gefunden, fahre ohne fort", self.name
+            )
+            await client.clear_cache()
+            return
+        try:
+            # Die App bekommt den Wert als Indication zurück, also vorher abonnieren
+            await client.start_notify(KEEPALIVE_UUID, self._on_keepalive_indication)
+        except BleakError as err:
+            _LOGGER.debug("%s: Keep-alive-Indications nicht aktivierbar: %s", self.name, err)
+        self._keepalive_ok = True
+        await self._keepalive()
+
+    def _on_keepalive_indication(
+        self, _char: BleakGATTCharacteristic, data: bytearray
+    ) -> None:
+        _LOGGER.debug("%s: Keep-alive-Antwort %s", self.name, data.hex())
+
     async def _keepalive(self) -> None:
+        if not self._keepalive_ok:
+            return
         _LOGGER.debug("%s: Keep-alive", self.name)
-        await self._write(KEEPALIVE_DATA, KEEPALIVE_UUID)
+        try:
+            await self._write(KEEPALIVE_DATA, KEEPALIVE_UUID)
+        except BleakError as err:
+            if self._client is None or not self._client.is_connected:
+                raise
+            _LOGGER.warning(
+                "%s: Keep-alive abgelehnt (%s), fahre ohne fort", self.name, err
+            )
+            self._keepalive_ok = False
 
     async def _command(self, data: bytes) -> None:
         try:
