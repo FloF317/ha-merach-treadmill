@@ -27,6 +27,7 @@ from .const import (
     KEEPALIVE_DATA,
     KEEPALIVE_INTERVAL,
     KEEPALIVE_UUID,
+    MAX_POLL_FAILURES,
     MAX_SPEED,
     MIN_SPEED,
     NOTIFY_UUID,
@@ -139,11 +140,27 @@ class MerachTreadmill:
                     last_error = None
                     loop = asyncio.get_running_loop()
                     next_keepalive = loop.time() + KEEPALIVE_INTERVAL
+                    poll_failures = 0
                     while self._client is not None and self._client.is_connected:
                         if loop.time() >= next_keepalive:
                             await self._keepalive()
                             next_keepalive = loop.time() + KEEPALIVE_INTERVAL
-                        await self._write(CMD_STATUS)
+                        try:
+                            await self._write(CMD_STATUS)
+                            poll_failures = 0
+                        except (BleakError, TimeoutError) as err:
+                            # Einzelne Schreibfehler (z. B. "Unlikely Error" über
+                            # den Proxy) sollen nicht gleich die Verbindung kosten
+                            poll_failures += 1
+                            if poll_failures >= MAX_POLL_FAILURES:
+                                raise
+                            _LOGGER.debug(
+                                "%s: Statusabfrage fehlgeschlagen (%d/%d): %s",
+                                self.name,
+                                poll_failures,
+                                MAX_POLL_FAILURES,
+                                err,
+                            )
                         await asyncio.sleep(POLL_INTERVAL)
                     _LOGGER.warning("%s: Verbindung verloren", self.name)
                 except (BleakError, TimeoutError) as err:
