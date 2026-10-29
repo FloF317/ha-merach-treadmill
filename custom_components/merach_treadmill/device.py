@@ -13,6 +13,12 @@ from bleak.exc import BleakError
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
 from homeassistant.components import bluetooth
+from homeassistant.components.bluetooth import (
+    BluetoothCallbackMatcher,
+    BluetoothChange,
+    BluetoothScanningMode,
+    BluetoothServiceInfoBleak,
+)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 
@@ -76,6 +82,7 @@ class MerachTreadmill:
         self._client: BleakClient | None = None
         self._listeners: list[Callable[[], None]] = []
         self._write_lock = asyncio.Lock()
+        self._advertised = asyncio.Event()
 
     def add_listener(self, update_callback: Callable[[], None]) -> Callable[[], None]:
         """Callback für Zustandsänderungen registrieren."""
@@ -91,11 +98,32 @@ class MerachTreadmill:
         for update_callback in list(self._listeners):
             update_callback()
 
+    @callback
+    def _on_advertisement(
+        self, _service_info: BluetoothServiceInfoBleak, _change: BluetoothChange
+    ) -> None:
+        self._advertised.set()
+
     async def async_run(self) -> None:
         """Verbinden, abfragen und bei Abbruch neu verbinden."""
         last_error: str | None = None
+        unregister = bluetooth.async_register_callback(
+            self.hass,
+            self._on_advertisement,
+            BluetoothCallbackMatcher(address=self.address, connectable=True),
+            BluetoothScanningMode.ACTIVE,
+        )
+        first_attempt = True
         try:
             while True:
+                if not first_attempt:
+                    await asyncio.sleep(RECONNECT_INTERVAL)
+                    # Erst wieder verbinden, wenn das Laufband sich frisch meldet.
+                    # Blinde Versuche pausieren beim Pi-Adapter das Scannen.
+                    self._advertised.clear()
+                    _LOGGER.debug("%s: warte auf Advertisement", self.name)
+                    await self._advertised.wait()
+                first_attempt = False
                 try:
                     await self._connect()
                     last_error = None
@@ -117,8 +145,8 @@ class MerachTreadmill:
                 except Exception:
                     _LOGGER.exception("%s: Unerwarteter Fehler", self.name)
                 await self.async_disconnect()
-                await asyncio.sleep(RECONNECT_INTERVAL)
         finally:
+            unregister()
             await self.async_disconnect()
 
     async def _connect(self) -> None:
