@@ -91,6 +91,7 @@ class MerachTreadmill:
         self._session_elapsed = 0.0
         self._session_distance = 0.0
         self._last_tick: float | None = None
+        self._generation = 0
 
     def add_listener(self, update_callback: Callable[[], None]) -> Callable[[], None]:
         """Callback für Zustandsänderungen registrieren."""
@@ -173,6 +174,7 @@ class MerachTreadmill:
             max_attempts=3,
         )
         self._client = client
+        self._generation += 1
         # Ablauf wie die Merach-App: erst Keep-alive, dann Notifications, dann Geräteinfos
         await self._setup_keepalive(client)
 
@@ -181,11 +183,13 @@ class MerachTreadmill:
             await client.clear_cache()
             raise BleakError("FitShow-Characteristic FFF1 nicht gefunden, Cache geleert")
         _LOGGER.debug("%s: Verbindung steht, aktiviere Notifications", self.name)
-        await client.start_notify(NOTIFY_UUID, self._on_notify)
+        await client.start_notify(NOTIFY_UUID, self._bind(self._on_notify))
 
         self._ftms_active = False
         try:
-            await client.start_notify(TREADMILL_DATA_UUID, self._on_treadmill_data)
+            await client.start_notify(
+                TREADMILL_DATA_UUID, self._bind(self._on_treadmill_data)
+            )
             self._ftms_active = True
         except BleakError as err:
             _LOGGER.warning(
@@ -237,6 +241,22 @@ class MerachTreadmill:
         state.elapsed = round(self._session_elapsed)
         state.distance = round(self._session_distance)
 
+    def _bind(
+        self, handler: Callable[[BleakGATTCharacteristic, bytearray], None]
+    ) -> Callable[[BleakGATTCharacteristic, bytearray], None]:
+        """Callback an die aktuelle Verbindung binden.
+
+        Nach einem unsauberen Abbruch liefert der ESPHome-Proxy Notifications
+        teils noch an die Abos alter Verbindungen. Die werden so ignoriert.
+        """
+        generation = self._generation
+
+        def wrapper(char: BleakGATTCharacteristic, data: bytearray) -> None:
+            if generation == self._generation:
+                handler(char, data)
+
+        return wrapper
+
     def _on_notify(self, _char: BleakGATTCharacteristic, data: bytearray) -> None:
         _LOGGER.debug("%s: RX %s", self.name, data.hex())
         if len(data) < 5 or data[0] != 0x02 or data[1] != 0x51:
@@ -286,7 +306,9 @@ class MerachTreadmill:
             return
         try:
             # Die App bekommt den Wert als Indication zurück, also vorher abonnieren
-            await client.start_notify(KEEPALIVE_UUID, self._on_keepalive_indication)
+            await client.start_notify(
+                KEEPALIVE_UUID, self._bind(self._on_keepalive_indication)
+            )
         except BleakError as err:
             _LOGGER.debug("%s: Keep-alive-Indications nicht aktivierbar: %s", self.name, err)
         self._keepalive_ok = True
